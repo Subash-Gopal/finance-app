@@ -1602,7 +1602,9 @@ function loadState() {
       APP.nwHistory = state.nwHistory || {};
       registerCustomCategories();
       fixAccountLinks();
-      migrateCategories(APP); // ensure any loaded data uses new categories
+      if (APP && APP.expenses) {
+        migrateCategories(APP);
+      } // ensure any loaded data uses new categories
       return true;
     }
     // Try loading from old v3 key and migrate
@@ -6166,7 +6168,7 @@ const XL = (() => {
 
     st.budgets = raw.budgets.map(o => { const b = strip(o); b.icon = b.icon || '💰'; b.limit = b.limit || 0; b.fine = b.fine || 0; return b; });
     st.goals = raw.goals.map(o => { const g = withId(o); g.icon = g.icon || '🎯'; g.target = g.target || 0; g.saved = g.saved || 0; g.monthly = g.monthly || 0; g.color = g.color || '#6C63FF'; g.deadline = g.deadline || ''; return g; });
-    st.debts = raw.debts.map(o => { const d = withId(o); d.amt = d.amt || 0; d.notes = d.notes || ''; d.status = d.status || 'pending'; d.color = d.color || '#6C63FF'; d.payments = missingOpt.debtPayments ? (((D.debts || []).find(x => x.id === d.id) || {}).payments || []) : raw.debtPayments.filter(p => p.debtId === d.id).map(p => ({ id: Date.now() + Math.floor(Math.random() * 1e6), date: p.date || '', amt: p.amt || 0, account: p.account || '', note: p.note || '' })); return d; });
+    st.debts = raw.debts.map(o => { const d = withId(o); d.amt = d.amt || 0; d.notes = d.notes || ''; d.status = d.status || 'pending'; d.color = d.color || '#6C63FF'; d.payments = missingOpt.debtPayments ? (((dflt.debts || []).find(x => x.id === d.id) || {}).payments || []) : raw.debtPayments.filter(p => p.debtId === d.id).map(p => ({ id: Date.now() + Math.floor(Math.random() * 1e6), date: p.date || '', amt: p.amt || 0, account: p.account || '', note: p.note || '' })); return d; });
     st.recurring = raw.recurring.map(o => { const r = withId(o); r.icon = r.icon || '🔄'; r.amt = r.amt || 0; r.freq = r.freq || 'Monthly'; r.cat = r.cat || 'Miscellaneous'; r.account = r.account || ''; r.dateSet = r.dateSet === undefined ? true : r.dateSet; return r; });
 
     const usageBy = new Map();
@@ -6211,7 +6213,7 @@ const XL = (() => {
     st.dealLinks = missingOpt.dealLinks ? (D.dealLinks || null) : raw.dealLinks.map(o => ({ id: Date.now() + Math.floor(Math.random() * 1e6), name: o.name, url: o.url, desc: o.desc || '', icon: o.icon || '🔗' }));
     st.manualItems = missingOpt.manualItems ? (D.manualItems || []) : raw.manualItems.map(o => { const m = withId(o); m.kind = /liab/i.test(m.kind || '') ? 'liability' : 'asset'; m.amt = m.amt || 0; return m; });
     st.nwHistory = missingOpt.nwHistory ? (D.nwHistory || {}) : Object.fromEntries(raw.nwHistory.map(r => [String(r.month).slice(0, 7), r.nw || 0]));
-    st.categoryOverrides = missingOpt.categoryEdits ? (D.categoryOverrides || {}) : Object.fromEntries(raw.categoryEdits.map(r => [r.name, { icon: r.icon || '💰', color: r.color || '#6C63FF', subcats: (r.subcatsTxt || '').split(',').map(x => x.trim()).filter(Boolean) }]));
+    st.categoryOverrides = missingOpt.categoryEdits ? (dflt.categoryOverrides || {}) : Object.fromEntries(raw.categoryEdits.map(r => [r.name, { icon: r.icon || '💰', color: r.color || '#6C63FF', subcats: (r.subcatsTxt || '').split(',').map(x => x.trim()).filter(Boolean) }]));
 
     // soft checks
     const accNames = new Set(st.accounts.map(a => a.name));
