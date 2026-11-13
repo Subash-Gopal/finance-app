@@ -6341,7 +6341,7 @@ async function importExcelFile(file, intro) {
     if (!saveState()) { keys.forEach(k => { APP[k] = prev[k]; }); toast('error', 'Import not applied', 'Browser storage could not hold the imported data. Nothing was changed.'); return; }
     if (intro) localStorage.setItem('financeai_xl_sync', String(file.lastModified));
     toast('success', 'Imported', 'Reloading with the new data...');
-    setTimeout(async () => { await gsFlush(); location.reload(); }, 600);
+    setTimeout(async () => { await gsFlush(); appReload(); }, 600);
   } catch (e) {
     console.error(e);
     alert('Could not read that file as an Excel workbook (.xlsx).\n\n' + e.message);
@@ -6446,6 +6446,12 @@ const _rb = renderBudgetPage; renderBudgetPage = function () {
 // ================================================================
 // LOANS & EMIs
 // ================================================================
+// Apps Script pages run in a sandbox iframe where location.reload() gives a blank page: re-init in place instead
+function appReload() {
+  if (!IS_GAS) { location.reload(); return; }
+  try { loadState(); initApp(); showPage('dashboard'); }
+  catch (e) { console.warn(e); toast('info', 'Done', 'Close and reopen the app link to see the new data.', 8000); }
+}
 const todayISO = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10); };
 function loanMonthsLeft(l) {
   const r = (l.rate || 0) / 1200, O = l.outstanding || 0;
@@ -7231,7 +7237,7 @@ const _ia4 = initApp; initApp = function () { _ia4(); setTimeout(() => { const d
 // THEME, BACKUP STATUS, SAVINGS PLAN, START FRESH
 // ================================================================
 (function () { const t = localStorage.getItem('financeai_theme') || 'dark'; document.documentElement.dataset.theme = t; if (window.Chart && t === 'dark') Chart.defaults.color = '#a4a7bd'; })();
-function toggleTheme() { localStorage.setItem('financeai_theme', document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); location.reload(); }
+function toggleTheme() { const n = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; localStorage.setItem('financeai_theme', n); if (IS_GAS) { document.documentElement.dataset.theme = n; refreshView(); } else location.reload(); }
 
 function updateDataStatus() {
   const el = document.getElementById('dataStatus'); if (!el) return;
@@ -7264,7 +7270,7 @@ async function clearDemoData() {
   APP.members = APP.members.slice(0, 1); APP.members[0].budget = 0;
   APP.manualItems = []; APP.nwHistory = {}; APP.loans = []; APP.recons = []; APP.incomes = [];
   APP.savingsRules.forEach(r => { r.totalSaved = 0; if (r.appliedDates) r.appliedDates = []; if ('lastApplied' in r) r.lastApplied = null; });
-  if (saveState()) { await gsFlush(); location.reload(); }
+  if (saveState()) { await gsFlush(); appReload(); }
 }
 
 // ================================================================
@@ -7533,7 +7539,11 @@ const _ia10 = initApp; initApp = function () { _ia10(); try { setupNavSections()
 // ================================================================
 // GOOGLE SHEETS SYNC: inside the Apps Script page (IS_GAS) or from any host once connected (see gas/Code.gs)
 // ================================================================
-const apiCfg = () => { try { return JSON.parse(localStorage.getItem('financeai_api') || '{}'); } catch (e) { return {}; } };
+let _memCfg = null;
+const apiCfg = () => {
+  if (_memCfg) return _memCfg;
+  try { return JSON.parse(localStorage.getItem('financeai_api') || '{}'); } catch (e) { return {}; }
+};
 const SYNC_ON = IS_GAS || !!apiCfg().url;
 const GS = { rev: 0, loaded: false, busy: false, again: false, mirrorT: null, status: '', retryT: null };
 const gsFlush = () => new Promise(r => { const t = () => (GS.busy || GS.again) ? setTimeout(t, 200) : r(); t(); });
@@ -7570,7 +7580,7 @@ async function gsPush() {
 }
 function gsConflict(rev) {
   gsSetStatus('changed on another device');
-  if (confirm('Your data was changed on another device since this page was opened.\n\nOK = load the latest data from Google Sheets (the change you just made here is discarded).\nCancel = keep this device\'s data and overwrite the sheet.')) location.reload();
+  if (confirm('Your data was changed on another device since this page was opened.\n\nOK = load the latest data from Google Sheets (the change you just made here is discarded).\nCancel = keep this device\'s data and overwrite the sheet.')) { localStorage.removeItem('financeai_gs_dirty'); gsRun('load').then(s => { GS.rev = s.rev || 0; if (s.json) gsUse(s.json); appReload(); }).catch(e => toast('error', 'Could not load', e.message || String(e))); }
   else { GS.rev = rev; gsPush(); }
 }
 // Decide whether this device should take the sheet's data or upload its own unsynced changes
@@ -7589,7 +7599,7 @@ async function gsRetry() {
   try {
     const c = await gsConnect(); clearInterval(GS.retryT);
     if (c.mode === 'push') gsPush();
-    else if (c.mode === 'use') { gsUse(c.json); toast('info', 'Newer data in Google Sheets', 'Reloading to show it…'); setTimeout(() => location.reload(), 1200); }
+    else if (c.mode === 'use') { gsUse(c.json); toast('info', 'Newer data in Google Sheets', 'Reloading to show it…'); setTimeout(appReload, 1200); }
     else gsSetStatus('connected');
   } catch (e) { GS.loaded = false; }
 }
@@ -7602,22 +7612,35 @@ function sheetConnectDialog() {
     if (!/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(url) || key.length < 20) { toast('error', 'Check the details', 'Use the web app link ending in /exec and the full API key'); return false; }
     const prev = localStorage.getItem('financeai_api');
     localStorage.setItem('financeai_api', JSON.stringify({ url, key }));
-    gsRun('load').then(() => { toast('success', 'Connected to Google Sheets', 'Reloading…'); setTimeout(() => location.reload(), 800); })
+    gsRun('load').then(() => { toast('success', 'Connected to Google Sheets', 'Reloading…'); setTimeout(appReload, 800); })
       .catch(e => { if (prev) localStorage.setItem('financeai_api', prev); else localStorage.removeItem('financeai_api'); toast('error', 'Could not connect', e.message || String(e), 12000); });
   });
 }
-function sheetDisconnect() { if (!confirm('Stop syncing this device with Google Sheets? Your data stays on this device and in the sheet.')) return; localStorage.removeItem('financeai_api'); location.reload(); }
+function sheetDisconnect() { if (!confirm('Stop syncing this device with Google Sheets? Your data stays on this device and in the sheet.')) return; localStorage.removeItem('financeai_api'); appReload(); }
 if (SYNC_ON) {
   const _onload = window.onload;
   window.onload = async () => {
-    document.body.insertAdjacentHTML('beforeend', '<div id="gsBoot" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:#0b0a2c;color:#fff;font:600 15px system-ui">Loading your data from Google Sheets…</div>');
-    let c = null;
-    try { c = await gsConnect(); if (c.mode === 'use') gsUse(c.json); }
-    catch (e) {
+  document.body.insertAdjacentHTML('beforeend', '<div id="gsBoot" style="position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:#0b0a2c;color:#fff;font:600 15px system-ui">Loading your data from Google Sheets…</div>');
+  let c = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      c = await gsConnect();
+      if (c.mode === 'use') gsUse(c.json);
+      GS.err = '';
+      break;
+    } catch (e) {
       GS.loaded = false; GS.err = e.message || String(e);
-      if (IS_GAS && /API key/i.test(e.message || '')) { const k = prompt('Enter your FinanceAI API key (from setupApiKey in Apps Script):'); if (k) { localStorage.setItem('financeai_api', JSON.stringify({ key: k.trim() })); location.reload(); return; } }
+      if (IS_GAS && /API key/i.test(GS.err)) {
+        const k = prompt(attempt ? 'That key was rejected. Enter the FinanceAI API key again:' : 'Enter your FinanceAI API key (from setupApiKey in Apps Script):');
+        if (!k) break;
+        _memCfg = Object.assign({}, apiCfg(), { key: k.trim() });
+        try { localStorage.setItem('financeai_api', JSON.stringify(_memCfg)); } catch (_) {}
+        continue;               // retry without reloading
+      }
+      break;
     }
-    _onload();
+  }
+  _onload();
     document.getElementById('gsBoot').remove();
     if (!c && /API key/i.test(GS.err || '')) { gsSetStatus('API key rejected'); toast('error', 'Google Sheet rejected the API key', 'Open Google Sheet sync in the sidebar (Data) and paste the current key. Nothing is synced until then.', 15000, { label: 'Fix', fn: sheetConnectDialog }); }
     else if (!c) { gsSetStatus('offline - changes kept on this device'); toast('warning', 'Working offline', 'Google Sheets could not be reached. Changes stay on this device and upload when you are back online.', 9000); GS.retryT = setInterval(gsRetry, 60000); window.addEventListener('online', gsRetry); }
